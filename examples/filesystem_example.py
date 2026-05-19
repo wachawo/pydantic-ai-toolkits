@@ -64,9 +64,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         agent = Agent(
             model=model,
-            toolsets=[
-                FilesystemToolset(root=tmp, read_only=False)
-            ],
+            toolsets=[FilesystemToolset(root=tmp, read_only=False)],
             system_prompt=(
                 "/no_think\n"
                 "You operate inside a sandboxed workspace. The sandbox root is "

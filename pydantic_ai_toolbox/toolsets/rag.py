@@ -409,9 +409,7 @@ class RAGToolset(BaseToolset):
         try:
             import numpy as np
         except ImportError as exc:
-            raise ImportError(
-                "RAGToolset requires numpy. Install via `pip install pydantic-ai-toolbox[rag]`."
-            ) from exc
+            raise ImportError("RAGToolset requires numpy. Install via `pip install pydantic-ai-toolbox[rag]`.") from exc
 
         if not callable(embedder):
             raise ValueError("embedder must be callable")
