@@ -38,11 +38,16 @@ With `read_only=True` (default), mutating tools raise `PermissionError`.
 | `make_dir`    | `(path: str) -> bool`                                  | `mkdir -p`                         |
 | `stat`        | `(path: str) -> dict`                                  | kind, size, mtime ISO              |
 | `glob`        | `(pattern: str = "**/*", include_dirs: bool = False)`  | capped at `max_glob_results`       |
+| `move`        | `(src: str, dst: str, overwrite: bool = False) -> bool` | refuses root / self-subtree moves  |
+| `copy_file`   | `(src: str, dst: str, overwrite: bool = False) -> bool` | rejects files over `max_bytes`     |
+| `copy_dir`    | `(src: str, dst: str, overwrite: bool = False) -> bool` | `dirs_exist_ok=overwrite`          |
+| `delete_dir`  | `(path: str, recursive: bool = False) -> bool`         | `recursive=False` needs empty dir  |
+| `grep`        | `(pattern, path=".", include="**/*", case_insensitive=False, fixed=False, max_matches=200)` | regex over file contents; skips files over `max_bytes` |
 
 ## Working example
 
-Six-turn agent flow: create → list → modify → read → delete → list. Full
-script: `examples/filesystem_example.py`.
+Seven-turn agent flow: create → append → copy → grep → move → delete_dir → list.
+Full script: `examples/filesystem_example.py`.
 
 ```python
 import tempfile
@@ -62,21 +67,21 @@ with tempfile.TemporaryDirectory() as tmp:
         toolsets=[fs],
         system_prompt=(
             "/no_think\n"
-            "You operate inside a sandboxed workspace. To create or overwrite "
-            "a file call `write_file(path, content)`. To extend an existing "
-            "file call `append_file`. To read use `read_file`. To list "
-            "entries call `list_dir(path)`. To remove call `delete_file`. "
-            "All paths are relative to the sandbox root — never use absolute "
-            "paths or `..`."
+            "You operate inside a sandboxed workspace. Tools: `write_file`, "
+            "`append_file`, `read_file`, `list_dir`, `copy_file(src, dst)`, "
+            "`move(src, dst)`, `grep(pattern, path='.', include='**/*')`, "
+            "`delete_file`, `delete_dir(path, recursive=True)`. All paths are "
+            "relative to the sandbox root — never use absolute paths or `..`."
         ),
     )
 
     agent.run_sync('Create a file named "notes.txt" with the text "hello".')
-    agent.run_sync("List every file in the sandbox root.")          # ['notes.txt']
     agent.run_sync('Append a new line "second line" to notes.txt.')
-    agent.run_sync("Read notes.txt and tell me what's in it.")      # 'hello\nsecond line'
-    agent.run_sync("Delete notes.txt.")
-    agent.run_sync("List every file in the sandbox root again.")    # []
+    agent.run_sync('Copy notes.txt to a new file called "backup.txt".')
+    agent.run_sync('Search for the word "second" across every file in the sandbox.')
+    agent.run_sync('Move backup.txt into a new directory called "archive" (final path archive/backup.txt).')
+    agent.run_sync('Delete the archive directory and everything inside it.')
+    agent.run_sync("List every file in the sandbox root.")          # ['notes.txt']
 ```
 
 The `/no_think` directive switches qwen3 out of its default chain-of-thought
@@ -91,9 +96,11 @@ LLM is in `tests/test_example_flows.py::TestFilesystemFlow`:
 ```python
 fs = FilesystemToolset(root=tmp_path, read_only=False)
 fs.write_file("notes.txt", "hello")
-assert "notes.txt" in fs.list_dir(".")
 fs.append_file("notes.txt", "\nsecond line\n")
-assert fs.read_file("notes.txt") == "hello\nsecond line\n"
-fs.delete_file("notes.txt")
-assert fs.list_dir(".") == []
+fs.copy_file("notes.txt", "backup.txt")
+hits = fs.grep("second")
+assert sorted(h["path"] for h in hits) == ["backup.txt", "notes.txt"]
+fs.move("backup.txt", "archive/backup.txt")
+fs.delete_dir("archive", recursive=True)
+assert fs.list_dir(".") == ["notes.txt"]
 ```

@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import shutil
 from pathlib import Path
 
 from ..base import BaseToolset, tool
@@ -14,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_BYTES = 1_000_000
 DEFAULT_MAX_GLOB_RESULTS = 500
+DEFAULT_MAX_GREP_MATCHES = 200
 
 
 class FilesystemToolset(BaseToolset):
@@ -141,6 +144,130 @@ class FilesystemToolset(BaseToolset):
                 if len(result) >= self.max_glob_results:
                     break
         return result
+
+    @tool
+    def move(self, src: str, dst: str, overwrite: bool = False) -> bool:
+        """Move or rename a file or directory inside the sandbox. Refuses to overwrite an existing destination by default."""
+        self.require_writable()
+        source = self.resolve(src)
+        target = self.resolve(dst)
+        if source == self.root:
+            raise ValueError("Refusing to move the sandbox root")
+        if not source.exists():
+            raise FileNotFoundError(f"Source not found: {src}")
+        if source == target:
+            raise ValueError(f"Source and destination are the same: {src}")
+        if source.is_dir() and target.is_relative_to(source):
+            raise ValueError(f"Destination is inside source: {dst}")
+        if target.exists() and not overwrite:
+            raise FileExistsError(f"Destination exists and overwrite=False: {dst}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and overwrite:
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        shutil.move(str(source), str(target))
+        logger.info(f"Moved {source} -> {target}")
+        return True
+
+    @tool
+    def copy_file(self, src: str, dst: str, overwrite: bool = False) -> bool:
+        """Copy a single file inside the sandbox. Refuses directories and files larger than `max_bytes`."""
+        self.require_writable()
+        source = self.resolve(src)
+        target = self.resolve(dst)
+        if not source.is_file():
+            raise FileNotFoundError(f"Source is not a file: {src}")
+        size = source.stat().st_size
+        if size > self.max_bytes:
+            raise ValueError(f"Source too large: {size} bytes > limit {self.max_bytes}")
+        if target.is_dir():
+            raise IsADirectoryError(f"Destination is a directory: {dst}")
+        if target.exists() and not overwrite:
+            raise FileExistsError(f"Destination exists and overwrite=False: {dst}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        logger.info(f"Copied {source} -> {target}")
+        return True
+
+    @tool
+    def copy_dir(self, src: str, dst: str, overwrite: bool = False) -> bool:
+        """Recursively copy a directory inside the sandbox. With overwrite=True, merges into an existing destination."""
+        self.require_writable()
+        source = self.resolve(src)
+        target = self.resolve(dst)
+        if not source.is_dir():
+            raise NotADirectoryError(f"Source is not a directory: {src}")
+        if source == self.root:
+            raise ValueError("Refusing to copy the sandbox root")
+        if target.is_relative_to(source):
+            raise ValueError(f"Destination is inside source: {dst}")
+        if target.exists() and not overwrite:
+            raise FileExistsError(f"Destination exists and overwrite=False: {dst}")
+        shutil.copytree(source, target, dirs_exist_ok=overwrite)
+        logger.info(f"Copied dir {source} -> {target}")
+        return True
+
+    @tool
+    def delete_dir(self, path: str, recursive: bool = False) -> bool:
+        """Delete a directory. Without `recursive=True`, only empty directories are removed. Refuses the sandbox root."""
+        self.require_writable()
+        target = self.resolve(path)
+        if target == self.root:
+            raise ValueError("Refusing to delete the sandbox root")
+        if not target.exists():
+            raise FileNotFoundError(f"Path not found: {path}")
+        if not target.is_dir():
+            raise NotADirectoryError(f"Not a directory: {path}")
+        if recursive:
+            shutil.rmtree(target)
+        else:
+            target.rmdir()
+        logger.info(f"Deleted dir {target} (recursive={recursive})")
+        return True
+
+    @tool
+    def grep(
+        self,
+        pattern: str,
+        path: str = ".",
+        include: str = "**/*",
+        case_insensitive: bool = False,
+        fixed: bool = False,
+        max_matches: int = DEFAULT_MAX_GREP_MATCHES,
+    ) -> list[dict]:
+        """Search file contents for a regex (or literal with fixed=True) pattern. Returns `{path, line, text}` per hit, capped at `max_matches`. Files exceeding `max_bytes` are skipped."""
+        base = self.resolve(path)
+        if not base.exists():
+            raise FileNotFoundError(f"Path not found: {path}")
+        flags = re.IGNORECASE if case_insensitive else 0
+        needle = re.compile(re.escape(pattern) if fixed else pattern, flags)
+        if base.is_file():
+            targets: list[Path] = [base]
+        else:
+            targets = [p for p in base.glob(include) if p.is_file()]
+        results: list[dict] = []
+        for f in targets:
+            try:
+                if f.stat().st_size > self.max_bytes:
+                    continue
+                with f.open("r", encoding=self.encoding, errors="replace") as fh:
+                    for lineno, line in enumerate(fh, start=1):
+                        if needle.search(line):
+                            results.append(
+                                {
+                                    "path": str(f.relative_to(self.root)),
+                                    "line": lineno,
+                                    "text": line.rstrip("\n"),
+                                }
+                            )
+                            if len(results) >= max_matches:
+                                return results
+            except OSError as exc:
+                logger.warning(f"grep: cannot read {f}: {type(exc).__name__}: {exc}")
+                continue
+        return results
 
 
 def main() -> None:

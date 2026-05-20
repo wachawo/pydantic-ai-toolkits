@@ -18,7 +18,7 @@ import pytest
 
 
 class TestFilesystemFlow:
-    """Mirrors examples/filesystem_example.py: create / list / modify / read / delete / list."""
+    """Mirrors examples/filesystem_example.py: create / append / copy / grep / move / delete_dir / list."""
 
     def test_full_flow(self, tmp_path: Path) -> None:
         from pydantic_ai_toolbox import FilesystemToolset
@@ -27,16 +27,22 @@ class TestFilesystemFlow:
 
         # 1. create
         fs.write_file("notes.txt", "hello")
-        # 2. list-1
-        assert "notes.txt" in fs.list_dir(".")
-        # 3. append
+        # 2. append
         fs.append_file("notes.txt", "\nsecond line\n")
-        # 4. read
         assert fs.read_file("notes.txt") == "hello\nsecond line\n"
-        # 5. delete
-        fs.delete_file("notes.txt")
-        # 6. list-2
-        assert fs.list_dir(".") == []
+        # 3. copy
+        fs.copy_file("notes.txt", "backup.txt")
+        assert fs.read_file("backup.txt") == "hello\nsecond line\n"
+        # 4. grep — both files contain "second"
+        hits = fs.grep("second")
+        assert sorted(h["path"] for h in hits) == ["backup.txt", "notes.txt"]
+        # 5. move backup.txt into a fresh archive/ subdirectory
+        fs.move("backup.txt", "archive/backup.txt")
+        assert "archive/" in fs.list_dir(".")
+        # 6. delete archive/ recursively
+        fs.delete_dir("archive", recursive=True)
+        # 7. list — only notes.txt remains
+        assert fs.list_dir(".") == ["notes.txt"]
 
 
 class TestSQLFlow:

@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `FilesystemToolset`: `move`, `copy_file`, `copy_dir`, `delete_dir`,
+  and `grep` tools. All honour the sandbox root and the existing
+  `read_only` / `max_bytes` limits. `copy_dir` and `move` refuse to
+  place a destination inside its source, and `delete_dir` refuses to
+  remove the sandbox root.
+
 ### Changed
 - **Breaking**: renamed PyPI distribution from `pydantic-ai-toolkits` to
   `pydantic-ai-toolbox`, the import module from `pydantic_ai_toolkits`

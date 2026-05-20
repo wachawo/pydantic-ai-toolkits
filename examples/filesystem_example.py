@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""FilesystemToolset example: create, list, modify, read, delete, list.
+"""FilesystemToolset example: create, modify, copy, grep, move, cleanup.
 
 A temporary directory becomes the sandbox root. The agent is asked, in
 sequence, to:
 
-  1. Create a file `notes.txt` containing one short line.
-  2. List the sandbox contents (should show notes.txt).
-  3. Append a second line to it.
-  4. Read the file back and report its contents.
-  5. Delete the file.
-  6. List the sandbox contents again (should be empty).
+  1. Create `notes.txt` with one short line.
+  2. Append a second line.
+  3. Copy `notes.txt` to `backup.txt`.
+  4. Grep for the word `second` (matches both files).
+  5. Move `backup.txt` into a fresh `archive/` directory.
+  6. Delete `archive/` recursively.
+  7. List the sandbox contents (only `notes.txt` remains).
 
 The toolset rejects any path that would escape the sandbox, so the
 agent literally cannot touch anything outside `root`.
@@ -68,10 +69,15 @@ def main() -> None:
             system_prompt=(
                 "/no_think\n"
                 "You operate inside a sandboxed workspace. The sandbox root is "
-                "addressed as '.' (a single dot). To create or overwrite a "
-                "file call `write_file(path, content)`. To extend an existing "
-                "file call `append_file`. To read use `read_file`. To list "
-                "entries call `list_dir(path='.')`. To remove call `delete_file`. "
+                "addressed as '.' (a single dot). Tools: `write_file(path, content)` "
+                "creates or overwrites; `append_file(path, content)` appends; "
+                "`read_file(path)` returns text; `list_dir(path='.')` lists entries; "
+                "`copy_file(src, dst)` copies one file (parent dirs created); "
+                "`move(src, dst)` renames or relocates (parent dirs created); "
+                "`grep(pattern, path='.', include='**/*')` searches file contents "
+                "and returns a list of `{path, line, text}`; "
+                "`delete_file(path)` removes one file; "
+                "`delete_dir(path, recursive=True)` removes a directory tree. "
                 "All paths are relative to the sandbox root — never use absolute "
                 "paths like '/' and never use '..'. "
                 "REPORT EVERY TOOL RESULT VERBATIM. Never invent file or "
@@ -83,20 +89,23 @@ def main() -> None:
         turn1 = agent.run_sync('Create a file named "notes.txt" with the text "hello".')
         logger.info(f"Turn 1 (create):     {turn1.output}")
 
-        turn2 = agent.run_sync("List every file at path '.'.")
-        logger.info(f"Turn 2 (list-1):     {turn2.output}")
+        turn2 = agent.run_sync('Append a new line "second line" to notes.txt.')
+        logger.info(f"Turn 2 (append):     {turn2.output}")
 
-        turn3 = agent.run_sync('Append a new line "second line" to notes.txt.')
-        logger.info(f"Turn 3 (modify):     {turn3.output}")
+        turn3 = agent.run_sync('Copy notes.txt to a new file called "backup.txt".')
+        logger.info(f"Turn 3 (copy):       {turn3.output}")
 
-        turn4 = agent.run_sync("Read notes.txt and tell me what's in it.")
-        logger.info(f"Turn 4 (read):       {turn4.output}")
+        turn4 = agent.run_sync('Search for the word "second" across every file in the sandbox.')
+        logger.info(f"Turn 4 (grep):       {turn4.output}")
 
-        turn5 = agent.run_sync("Delete notes.txt.")
-        logger.info(f"Turn 5 (delete):     {turn5.output}")
+        turn5 = agent.run_sync('Move backup.txt into a new directory called "archive" (final path archive/backup.txt).')
+        logger.info(f"Turn 5 (move):       {turn5.output}")
 
-        turn6 = agent.run_sync("List every file at path '.' again.")
-        logger.info(f"Turn 6 (list-2):     {turn6.output}")
+        turn6 = agent.run_sync("Delete the archive directory and everything inside it.")
+        logger.info(f"Turn 6 (delete_dir): {turn6.output}")
+
+        turn7 = agent.run_sync("List every file at path '.'.")
+        logger.info(f"Turn 7 (list):       {turn7.output}")
 
 
 if __name__ == "__main__":
